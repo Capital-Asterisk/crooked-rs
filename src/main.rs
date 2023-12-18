@@ -1,4 +1,13 @@
-mod lgrn;
+
+
+use obfuscation::lgrn;
+use obfuscation::game;
+use obfuscation::draw;
+
+use glam::{vec2, Mat4, Vec2};
+
+pub extern crate glam;
+
 
 pub mod mq
 {
@@ -30,6 +39,8 @@ fn repitch(data: &mut [u8], sample_rate_original: u32, rate_shift: f32)
 #[macroquad::main("BasicShapes")]
 async fn main() {
 
+
+
     let mut a: lgrn::BitVec = vec![0, 0];
 
     let mut data = mq::load_file("tf/custom/step.wav").await.unwrap();
@@ -47,8 +58,15 @@ async fn main() {
     //step = mq::load_sound_from_bytes(&data).await.unwrap();
 
 
+    let mut game_main = game::GameMain
+    {
+        player_pos: vec2(2.0, 2.0)
+    };
 
-    let texture: mq::Texture2D = mq::load_texture("tf/custom/rook1.png").await.unwrap();
+
+    let mut game_draw: draw::GameDraw = draw::make_game_draw().await;
+
+
 
     lgrn::bitvec_set(&mut a, 2);
 
@@ -65,19 +83,10 @@ async fn main() {
             mq::play_sound_once(&step_sounds[mq::gen_range(0, step_sounds.len())]);
         }
 
-        mq::clear_background(mq::Color::from_rgba(1, 46, 87, 255));
-
-
-
-
-        //mq::draw_line(40.0, 40.0, 100.0, 200.0, 15.0, mq::BLUE);
-        //mq::draw_rectangle(mq::screen_width() / 2.0 - 60.0, 100.0, 120.0, 60.0, mq::GREEN);
-        //mq::draw_circle(mq::screen_width() - 30.0, mq::screen_height() - 30.0, 15.0, mq::YELLOW);
-
-        //mq::draw_text("IT WORKS!", 20.0, b as f32, 30.0, mq::DARKGRAY);
-        mq::draw_texture(&texture, b as f32, 100.0 - (((mq::get_time() as f32)*2.0*3.14159*2.0).sin().abs()*40.0)+b as f32, mq::WHITE);
 
         b += 1;
+
+        draw::draw_game(&game_main, &mut game_draw);
 
         mq::next_frame().await
     }
