@@ -1,10 +1,13 @@
-use crate::game::{self, TILE_SIZE};
+use crate::game::{self, TILE_SIZE, rot_cw_90};
 
 use glam::{vec2, Vec2, Mat2, mat2};
 
 
 pub struct GameDraw {
     pub sprites: mq::Texture2D,
+
+    pub cam_center: Vec2,
+    pub mouse_pos: Vec2,
 
     pub stupidraw: Vec<(f32, Vec2, Mat2, (Vec2,Vec2))>,
 
@@ -23,6 +26,8 @@ pub mod mq {
 pub async fn make_game_draw() -> GameDraw {
     GameDraw{
         sprites: mq::load_texture("tf/custom/sprites.png").await.unwrap(),
+        cam_center: vec2(0.0, 0.0),
+        mouse_pos: vec2(0.0, 0.0),
         stupidraw: Default::default(),
         player_hop_time: 0.0,
         player_hop_rate: 0.25,
@@ -56,7 +61,7 @@ pub fn draw_game(main: &game::GameMain, draw: &mut GameDraw) {
 
     // Do camera stuff
     let screen_size = vec2(mq::screen_width(), mq::screen_height());
-    let view_cam_center = main.player_pos.clamp(0.5*vec2(view_size, view_size), world_size_f32 - 0.5*vec2(view_size, view_size));
+    draw.cam_center = main.player_pos.clamp(0.5*vec2(view_size, view_size), world_size_f32 - 0.5*vec2(view_size, view_size));
     let screen_wide = screen_size.x > screen_size.y; // if false, screen is tall or square
     let view_square = if screen_wide { screen_size.y } else { screen_size.x };
     let view_scale = view_square / view_size;
@@ -65,7 +70,10 @@ pub fn draw_game(main: &game::GameMain, draw: &mut GameDraw) {
     } else {
         vec2(0.0, 0.5*screen_size.y - 0.5*screen_size.x)
     };
-    let view_offset = view_offset - (view_cam_center - 0.5*vec2(view_size, view_size)) * view_scale;
+    let view_offset = view_offset - (draw.cam_center - 0.5*vec2(view_size, view_size)) * view_scale;
+
+    let (mouse_x, mouse_y) = mq::mouse_position();
+    draw.mouse_pos = (vec2(mouse_x, mouse_y) - view_offset) / view_scale;
 
     mq::clear_background(mq::Color::from_rgba(1, 46, 87, 255));
 
@@ -96,14 +104,13 @@ pub fn draw_game(main: &game::GameMain, draw: &mut GameDraw) {
     }
 
     // Draw drones
-    for drone in main.drone_ids.iter_ids() {
+    for id in main.drone_ids.iter_ids() {
 
-        let pos = main.drone_pos[drone.0] * view_scale + view_offset;
+        let pos = main.drone_pos[id.0] * view_scale + view_offset;
 
         let mat = Mat2::from_diagonal(TILE_SIZE * view_scale);
 
-        if on_screen(pos, mat)
-        {
+        if on_screen(pos, mat) {
             draw.stupidraw.push((pos.y, pos, mat, sprite(1, 0)));
         }
     }
@@ -126,8 +133,24 @@ pub fn draw_game(main: &game::GameMain, draw: &mut GameDraw) {
         draw.stupidraw.push((pos.y, pos + vec2(0.0, -hop) * view_scale, mat, coord));
     }
 
+    // Draw bullets
+    for id in main.bullet_ids.iter_ids() {
+
+        let pos = main.bullet_pos[id.0] * view_scale + view_offset;
+
+        let dir = main.bullet_data[id.0].dir;
+        let mat = Mat2::from_diagonal(TILE_SIZE * view_scale) * Mat2::from_cols(dir, rot_cw_90(dir));
+
+        if on_screen(pos, mat)
+        {
+
+
+            draw.stupidraw.push((pos.y, pos, mat, sprite(0, 1)));
+        }
+    }
+
     // Draw sprites
-    draw.stupidraw.sort_unstable_by(|lhs, rhs| lhs.0.partial_cmp(&rhs.0).unwrap() );
+    draw.stupidraw.sort_by(|lhs, rhs| lhs.0.partial_cmp(&rhs.0).unwrap() );
     for args in &draw.stupidraw {
         draw_texture_gwah(&draw.sprites, args.1, args.2, args.3);
     }

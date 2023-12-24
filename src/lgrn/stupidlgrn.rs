@@ -1,5 +1,4 @@
 use std::marker::PhantomData;
-use std::slice::SliceIndex;
 
 pub type BitVec = Vec<u64>;
 
