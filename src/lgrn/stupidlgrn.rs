@@ -100,6 +100,16 @@ impl<T: Into<usize> + From<usize> + Copy> IdReg<T> {
         Some(T::from(pos))
     }
 
+    #[must_use]
+    pub fn create_resize(&mut self) -> T {
+        if let Some(id) = self.create() {
+            return id;
+        } else {
+            self.resize(self.capacity() * 2);
+            return self.create().unwrap();
+        }
+    }
+
     pub fn capacity(&self) -> usize { self.data.capacity() * 64 }
 
     pub fn resize(&mut self, capacity: usize) {
