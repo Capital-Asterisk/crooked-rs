@@ -3,6 +3,8 @@ use glam::{vec2, Vec2, UVec2};
 use std::{collections::BTreeMap, default};
 use crate::lgrn;
 
+use std::ops::Not;
+
 pub const TILE_SIZE: Vec2 = vec2(64.0, 64.0);
 
 lgrn::id_type!(ItemTypeId);
@@ -10,6 +12,7 @@ lgrn::id_type!(FeralItemId);
 lgrn::id_type!(DroneId);
 lgrn::id_type!(BulletId);
 lgrn::id_type!(MachineId);
+
 
 
 #[derive(Default)]
@@ -42,6 +45,7 @@ pub struct GameMain {
     pub tool:           ToolMode
 }
 
+#[derive(Default)]
 pub struct ItemType {
     pub sprite:         (Vec2, Vec2),
     pub stackable:      u32,
@@ -101,13 +105,53 @@ pub struct Bullet {
 #[derive(Clone, Default)]
 pub struct FeralItem {
     pub pos: UVec2,
-    pub slots: [Option<(ItemSlot, Vec2)>; 4]
+
+    // [0] is drawn as the front since items are taken from [0]. New items are pushed into the back
+    // to behave as a FIFO
+    pub slots: Burger
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct ItemSlot {
     pub itemtype: ItemTypeId,
     pub count: u32,
+}
+
+type Burger = [Option<ItemSlot>; 4];
+
+pub fn slots_contains(slots: &[Option<(ItemSlot, Vec2)>], itype: ItemTypeId, mut amount: u32) -> bool {
+    for exslotasdf in slots {
+        if let Some((exslot, _)) = exslotasdf {
+            if exslot.itemtype != itype {
+                continue;
+            };
+            amount = amount.saturating_sub(exslot.count);
+            if amount == 0 {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+pub fn slots_can_hold(item_types: &Vec<ItemType>, slots: &[Option<(ItemSlot, Vec2)>], can_hold: &mut [(ItemTypeId, u32)]) -> bool {
+    for exslotopt in slots {
+        if let Some((exslot, _)) = exslotopt {
+            if let Some((ref mut itypeid, ref mut remaining)) = can_hold.iter_mut().find(|(ref itypeid, _)| *itypeid == exslot.itemtype) {
+                let itype = &item_types[itypeid.0];
+                *remaining -= u32::min(itype.stackable.saturating_sub(exslot.count), *remaining);
+                if *remaining == 0 {
+                    *itypeid = Default::default();
+                }
+            }
+        } else {
+            if let Some((ref mut itypeid, ref mut remaining)) = can_hold.iter_mut().find(|(_, remaining)| *remaining != 0) {
+                *remaining = 0; // empty slot. put anything here
+                *itypeid = Default::default();
+            }
+        }
+    }
+    return can_hold.iter().all(|(_, remaining)| *remaining == 0);
 }
 
 pub fn place_item(item_types: &Vec<ItemType>, feral_ids: &mut lgrn::IdReg<FeralItemId>, feral_data: &mut Vec<FeralItem>, feral_by_tile: &mut BTreeMap<(u8, u8), FeralItemId>, pos: UVec2, slot: ItemSlot) -> Result<FeralItemId, (FeralItemId, ItemSlot)> {
@@ -122,7 +166,7 @@ pub fn place_item(item_types: &Vec<ItemType>, feral_ids: &mut lgrn::IdReg<FeralI
 
             // distribute
             for exslotasdf in &mut d.slots {
-                if let Some((exslot, _)) = exslotasdf {
+                if let Some(exslot) = exslotasdf {
                     if exslot.itemtype != slotopt.as_ref().unwrap().itemtype {
                         continue;
                     };
@@ -137,7 +181,7 @@ pub fn place_item(item_types: &Vec<ItemType>, feral_ids: &mut lgrn::IdReg<FeralI
                         break;
                     }
                 } else if let None = exslotasdf {
-                    *exslotasdf = Some((slotopt.take().unwrap(), vec2(0.0, 0.0)));
+                    *exslotasdf = Some(slotopt.take().unwrap());
                     break;
                 }
             }
@@ -155,12 +199,137 @@ pub fn place_item(item_types: &Vec<ItemType>, feral_ids: &mut lgrn::IdReg<FeralI
             feral_data.resize(feral_ids.capacity(), Default::default());
             let d: &mut FeralItem = &mut feral_data[feral.0];
             d.pos = pos;
-            d.slots[0] = Some((slot, vec2(0.0, 0.0)));
+            d.slots[0] = Some(slot);
 
             return Ok(feral);
         }
     };
 }
+
+pub fn feral_remove_if_empty(feral_ids: &mut lgrn::IdReg<FeralItemId>, feral_data: &mut Vec<FeralItem>, feral_by_tile: &mut BTreeMap<(u8, u8), FeralItemId>, feral: FeralItemId) {
+    let d = &mut feral_data[feral.0];
+    if d.slots.iter().all(|x| x.is_none()) {
+        // No more slots left. feral item is gone 🦀
+        feral_ids.remove(feral);
+        feral_by_tile.remove(&(d.pos.x as u8, d.pos.y as u8));
+    }
+}
+
+pub const ITEM_DEAD_DRONE   : ItemTypeId = ItemTypeId(0);
+pub const ITEM_SCRAP        : ItemTypeId = ItemTypeId(1);
+pub const ITEM_BATTERY      : ItemTypeId = ItemTypeId(2);
+pub const ITEM_ALIGNITE     : ItemTypeId = ItemTypeId(3);
+pub const ITEM_GUNPOWDER    : ItemTypeId = ItemTypeId(4);
+
+pub fn craft_item_recipe(item_types: &Vec<ItemType>, slots: &Burger, recipe: u32) -> Option<Burger> {
+    match recipe {
+        0 => craftt(item_types, slots,
+            &mut [ItemSlot{itemtype: ITEM_DEAD_DRONE, count: 1}],
+            &mut [ItemSlot{itemtype: ITEM_SCRAP, count: 1}, ItemSlot{itemtype: ITEM_BATTERY, count: 1}]),
+
+        _ => panic!()
+    }
+}
+
+pub fn craft_machine_recipe(item_types: &Vec<ItemType>, slots: &Burger, recipe: u32) -> Option<Burger> {
+    match recipe {
+        5 => craftt(item_types, slots, &mut [ItemSlot{itemtype: ITEM_SCRAP, count: 2}], &mut []),
+        _ => panic!()
+    }
+}
+
+
+
+pub fn craftt(item_types: &Vec<ItemType>, slots: &Burger, req: &mut [ItemSlot], out: &mut [ItemSlot]) -> Option<Burger> {
+
+    let mut draft: Burger = slots.clone();
+
+    // check required items
+    for draft_slot_opt in draft.iter_mut() {
+        if let Some(draft_slot) = draft_slot_opt {
+            if let Some(req_slot) = req.iter_mut().find(|req_slot_n| draft_slot.itemtype == req_slot_n.itemtype) {
+                let consume = u32::min(draft_slot.count, req_slot.count);
+
+                req_slot  .count -= consume;
+                draft_slot.count -= consume;
+
+                if draft_slot.count == 0 {
+                    *draft_slot_opt = None;
+                }
+            }
+        }
+    }
+
+    if req.iter().any(|req_slot_n| req_slot_n.count != 0) {
+        return None; // Requirements not satisfied
+    }
+
+    // fucklection-sort to move Somes left and Nones right
+    let mut cake = draft.as_mut_slice();
+    while cake.is_empty().not() {
+        if cake[0].is_none() {
+            if let Some(idk) = cake.iter_mut().find(|foo| foo.is_some()) {
+                cake[0] = idk.take();
+            } else {
+                break; // no more Some left
+            }
+        } else {
+            cake = &mut cake[1..];
+        }
+    }
+
+    // dump output items into slot
+    'outer: for out_slot in out.iter_mut() {
+        for draft_slot_opt in draft.iter_mut() {
+            if out_slot.count == 0 {
+                continue 'outer;
+            }
+
+            if let Some(draft_slot) = draft_slot_opt {
+                if draft_slot.itemtype == out_slot.itemtype {
+                    let stackable = &item_types[draft_slot.itemtype.0].stackable;
+                    let transfer = u32::min(stackable - draft_slot.count, out_slot.count);
+
+                    out_slot  .count -= transfer;
+                    draft_slot.count += transfer;
+                }
+            } else {
+                // empty slot. put anything here
+                *draft_slot_opt = Some(out_slot.clone());
+                *out_slot = Default::default();
+            }
+        }
+
+        if out_slot.count != 0 {
+            return None;
+        }
+    }
+
+/*
+
+    for draft_slot_opt in draft.iter_mut() {
+        if let Some(draft_slot) = draft_slot_opt {
+            if let Some(out_slot) = out.iter_mut().find(|out_slot_n| draft_slot.itemtype == out_slot_n.itemtype) {
+
+            }
+        } else {
+            // empty slot. put anything here
+            if let Some(out_slot) = out.iter_mut().find(|out_slot_n| out_slot_n.count != 0) {
+                *draft_slot_opt = Some(out_slot.clone());
+                *out_slot = Default::default();
+            }
+        }
+    }*/
+
+    return Some(draft);
+}
+
+
+/*
+pub fn slots_recipies(slots: &[Option<(ItemSlot, Vec2)>], itype: ItemTypeId, mut amount: u32) -> [bool; 3] {
+
+}*/
+
 
 
 pub fn rot_cw_90(a: Vec2) -> Vec2 { vec2(-a.y, a.x) }

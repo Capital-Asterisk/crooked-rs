@@ -60,6 +60,7 @@ async fn main() {
     let place_sound = mq::load_sound("tf/custom/place.wav").await.unwrap();
     let deflect_sound = mq::load_sound("tf/custom/deflect.wav").await.unwrap();
     let explode_sound = mq::load_sound("tf/custom/explode.wav").await.unwrap();
+    let craft_sound = mq::load_sound("tf/custom/craft.wav").await.unwrap();
 
     //let step: mq::Sound;
     //step = mq::load_sound_from_bytes(&data).await.unwrap();
@@ -131,12 +132,18 @@ async fn main() {
         desc: "Energy-dense explosive solid"
     });
 
+
     game_main.feral_ids.resize(512);
     let j = game_main.feral_ids.create().unwrap();
 
     game_main.feral_data.resize(512, Default::default());
-    game_main.feral_data[j.0].slots[0] = Some((ItemSlot{itemtype: ItemTypeId(0), count: 1}, vec2(0.0, 0.0)));
+    game_main.feral_data[j.0].slots[0] = Some(ItemSlot{itemtype: ItemTypeId(0), count: 1});
     game_main.feral_by_tile.insert((0, 0), j);
+
+    place_item(&game_main.itemtype_data, &mut game_main.feral_ids, &mut game_main.feral_data, &mut game_main.feral_by_tile, uvec2(3, 4), ItemSlot { itemtype: ItemTypeId(2), count: 44 }).ok();
+    place_item(&game_main.itemtype_data, &mut game_main.feral_ids, &mut game_main.feral_data, &mut game_main.feral_by_tile, uvec2(3, 4), ItemSlot { itemtype: ItemTypeId(2), count: 44 }).ok();
+    place_item(&game_main.itemtype_data, &mut game_main.feral_ids, &mut game_main.feral_data, &mut game_main.feral_by_tile, uvec2(3, 4), ItemSlot { itemtype: ItemTypeId(2), count: 44 }).ok();
+    place_item(&game_main.itemtype_data, &mut game_main.feral_ids, &mut game_main.feral_data, &mut game_main.feral_by_tile, uvec2(3, 4), ItemSlot { itemtype: ItemTypeId(2), count: 44 }).ok();
 
     let mut game_draw: draw::GameDraw = draw::make_game_draw().await;
 
@@ -192,15 +199,9 @@ async fn main() {
                         let slot_extracted = slot.take().unwrap();
                         d.slots.rotate_left(1);
 
-                        if d.slots.iter().all(|x| x.is_none()) {
-                            // No more slots left. feral item is gone 🦀
-                            game_main.feral_ids.remove(feral);
-                            game_main.feral_by_tile.remove(&(d.pos.x as u8, d.pos.y as u8));
-                        }
+                        feral_remove_if_empty(&mut game_main.feral_ids, &mut game_main.feral_data, &mut game_main.feral_by_tile, feral);
 
-                        println!("AAAA: {}", feral.0);
-
-                        *drag = Drag::Item(slot_extracted.0);
+                        *drag = Drag::Item(slot_extracted);
 
                         mq::play_sound(&pickup_sound, mq::PlaySoundParams { looped: false, volume: 0.5 });
                     }
@@ -222,6 +223,27 @@ async fn main() {
                     }
                 }
             }
+
+            if let Drag::None = drag {
+
+                if mq::is_key_pressed(mq::KeyCode::Key1) {
+                    if let TileThing::Feral(feral) = game_draw.under_cursor {
+                        if let Some(gwah) = craft_item_recipe(&game_main.itemtype_data, &game_main.feral_data[feral.0].slots, 0) {
+                            game_main.feral_data[feral.0].slots = gwah;
+                            mq::play_sound(&craft_sound, mq::PlaySoundParams { looped: false, volume: 1.0 });
+                        }
+                    }
+                } else if mq::is_key_pressed(mq::KeyCode::Key5) {
+                    if let TileThing::Feral(feral) = game_draw.under_cursor {
+                        if let Some(gwah) = craft_machine_recipe(&game_main.itemtype_data, &game_main.feral_data[feral.0].slots, 5) {
+                            game_main.feral_data[feral.0].slots = gwah;
+                            mq::play_sound(&craft_sound, mq::PlaySoundParams { looped: false, volume: 1.0 });
+
+                            feral_remove_if_empty(&mut game_main.feral_ids, &mut game_main.feral_data, &mut game_main.feral_by_tile, feral);
+                        }
+                    }
+                }
+            }
         }
 
         use Dir;
@@ -236,7 +258,7 @@ async fn main() {
         // Move drones
         for drone in game_main.drone_ids.iter_ids() {
             let d: &mut Drone     = &mut game_main.drone_data[drone.0];
-            let p: &mut Vec2            = &mut game_main.drone_pos[drone.0];
+            let p: &mut Vec2      = &mut game_main.drone_pos[drone.0];
             let r: &Rail          = &game_main.rail[d.rail_idx];
 
             let mut dir = match r.dir {

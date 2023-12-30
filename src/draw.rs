@@ -1,6 +1,6 @@
 use crate::game::*;
 
-
+use std::fmt::Write;
 use glam::{vec2, Vec2, uvec2, UVec2, Mat2, mat2};
 
 use std::ops::Not;
@@ -9,6 +9,8 @@ use std::ops::Not;
 
 pub struct GameDraw {
     pub sprites: mq::Texture2D,
+    pub font: mq::Font,
+    pub stupid: String,
 
     pub cam_center: Vec2,
     pub mouse_pos: Vec2,
@@ -38,6 +40,8 @@ pub mod mq {
 pub async fn make_game_draw() -> GameDraw {
     GameDraw{
         sprites:            mq::load_texture("tf/custom/sprites.png").await.unwrap(),
+        font:               mq::load_ttf_font("tf/custom/atkinson.ttf").await.unwrap(),
+        stupid:             Default::default(),
         cam_center:         vec2(0.0, 0.0),
         mouse_pos:          vec2(0.0, 0.0),
         mouse_select:       uvec2(0, 0),
@@ -190,7 +194,7 @@ pub fn draw_game(main: &GameMain, draw: &mut GameDraw) {
         let count = d.slots.iter().filter(|a| a.is_some()).count();
 
         let mut draw_it_uwu = |idx: usize, offset: Vec2| {
-            let Some((asdf, _)) = &d.slots[idx] else { panic!() };
+            let Some(asdf) = &d.slots[idx] else { panic!() };
             let dit = &main.itemtype_data[asdf.itemtype.0];
             draw.stupidraw.push((dpos.y, dpos + offset*TILE_SIZE, mat, dit.sprite));
         };
@@ -200,19 +204,19 @@ pub fn draw_game(main: &GameMain, draw: &mut GameDraw) {
                 draw_it_uwu(0, vec2(0.0, 0.0));
             },
             2 => {
-                draw_it_uwu(0, vec2(-0.1, -0.1));
-                draw_it_uwu(1, vec2(0.1, 0.0));
+                draw_it_uwu(1, vec2(-0.1, -0.1));
+                draw_it_uwu(0, vec2(0.1, 0.0));
             },
             3 => {
-                draw_it_uwu(0, vec2(0.1, -0.1));
+                draw_it_uwu(2, vec2(0.1, -0.1));
                 draw_it_uwu(1, vec2(-0.1, 0.0));
-                draw_it_uwu(2, vec2(0.0, 0.1));
+                draw_it_uwu(0, vec2(0.0, 0.1));
             },
             4 => {
-                draw_it_uwu(0, vec2(0.1, -0.1));
-                draw_it_uwu(1, vec2(-0.1, -0.05));
-                draw_it_uwu(2, vec2(0.1, 0.05));
-                draw_it_uwu(3, vec2(-0.1, 0.1));
+                draw_it_uwu(3, vec2(0.1, -0.15));
+                draw_it_uwu(2, vec2(-0.1, -0.05));
+                draw_it_uwu(1, vec2(0.1, 0.05));
+                draw_it_uwu(0, vec2(-0.1, 0.15));
             },
 
             _ => {
@@ -233,6 +237,8 @@ pub fn draw_game(main: &GameMain, draw: &mut GameDraw) {
 
     // Draw cursor
 
+    let font = Some(&draw.font);
+    let font_size = (20.0*view_scale) as u16;
 
     let select_pos = draw.mouse_select.as_vec2() * TILE_SIZE * view_scale + view_offset;
     let select_size = TILE_SIZE * view_scale;
@@ -240,21 +246,74 @@ pub fn draw_game(main: &GameMain, draw: &mut GameDraw) {
         ToolMode::Construct(drag) => {
             match drag {
                 Drag::None => {
-                    let (color, thicc) = match draw.under_cursor {
-                        TileThing::None => (mq::WHITE, 2.0),
-                        TileThing::Feral(_) => (mq::GREEN, 8.0),
-                        TileThing::Machine(_) => (mq::GREEN, 8.0)
+                    match draw.under_cursor {
+                        TileThing::None => {
+                            mq::draw_rectangle_lines(select_pos.x, select_pos.y, select_size.x, select_size.y, 2.0, mq::WHITE);
+                        },
+                        TileThing::Feral(feral) => {
+                            mq::draw_rectangle_lines(select_pos.x, select_pos.y, select_size.x, select_size.y, 8.0, mq::GREEN);
+                            draw.stupid.clear();
+
+                            for exslot in &main.feral_data[feral.0].slots {
+                                if let Some(slot) = exslot {
+                                    let dit = &main.itemtype_data[slot.itemtype.0];
+                                    write!(draw.stupid, "* {}× {}\n", slot.count, dit.name).unwrap();
+                                }
+                            }
+
+                            // >:)
+
+                            if craft_item_recipe(&main.itemtype_data, &main.feral_data[feral.0].slots, 0).is_some() {
+                                write!(draw.stupid, "Press [1] to Disassemble\n").unwrap();
+                            }
+                             if craft_machine_recipe(&main.itemtype_data, &main.feral_data[feral.0].slots, 5).is_some() {
+                                write!(draw.stupid, "Press [5] to craft Turret\n").unwrap();
+                            }
+
+
+                            let (lines, text_width) = {
+                                let mut text_width = 0.0_f32;
+                                let mut lines = 0_u32;
+                                for splitipy in draw.stupid.split("\n") {
+                                    text_width = text_width.max(mq::measure_text(splitipy, font, font_size, 1.0).width);
+                                    lines += 1;
+                                }
+
+                                (lines, text_width)
+                            };
+
+
+                            let width = text_width + 9.0*view_scale;
+                            let height = 10.0*view_scale + (lines * font_size as u32) as f32;
+                            let posx = f32::min(select_pos.x, screen_size.x - width);
+                            let posy = f32::min(select_pos.y + TILE_SIZE.y*view_scale, screen_size.y - height);
+
+                            mq::draw_rectangle(posx, posy, width, height, mq::Color::new(0.0, 0.0, 0.0, 0.75));
+                            mq::draw_rectangle_lines(posx, posy, width, height, 2.0, mq::WHITE);
+
+                            let mut yoffset = font_size as f32;
+                            for splitipy in draw.stupid.split("\n") {
+                                mq::draw_text_ex(splitipy, posx + 4.0*view_scale, posy + 2.0*view_scale + yoffset, mq::TextParams {
+                                    font,
+                                    font_size,
+                                    //font_scale: 0.5*view_scale,
+                                    color: mq::WHITE,
+                                    ..Default::default()
+                                });
+                                yoffset += font_size as f32;
+                            }
+                        },
+                        TileThing::Machine(_) => {
+                            //(mq::GREEN, 8.0)
+                        }
                     };
-                    mq::draw_rectangle_lines(select_pos.x, select_pos.y, select_size.x, select_size.y, thicc, color);
+
                 },
                 Drag::Item(slot) => {
                     let dit = &main.itemtype_data[slot.itemtype.0];
                     let mat = Mat2::from_diagonal(TILE_SIZE * view_scale);
                     draw_texture_gwah(&draw.sprites, vec2(select_pos.x, select_pos.y) + 0.5*TILE_SIZE*view_scale, mat, sprite(4, 1), mq::WHITE);
                     draw_texture_gwah(&draw.sprites, vec2(mouse_x, mouse_y) - vec2(0.0, 0.5*TILE_SIZE.y), mat, dit.sprite, mq::Color::new(1.0, 1.0, 1.0, 0.75));
-
-
-
                 },
                 _ => {}
             }
@@ -263,6 +322,8 @@ pub fn draw_game(main: &GameMain, draw: &mut GameDraw) {
             draw_texture_gwah(&draw.sprites, vec2(mouse_x, mouse_y), Mat2::from_diagonal(vec2(64.0, 64.0)), sprite(3, 1), mq::WHITE);
         }
     }
+
+
 
 
 
